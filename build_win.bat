@@ -3,6 +3,14 @@ echo =========================================
 echo  SmartFlashCard - Windows Build Script
 echo =========================================
 echo.
+
+IF EXIST venv\Scripts\activate.bat (
+    echo Activating virtual environment...
+    call venv\Scripts\activate.bat
+) ELSE (
+    echo Warning: 'venv' directory not found. Proceeding with global python...
+)
+
 echo Installing requirements...
 pip install -r requirements.txt
 pip install pyinstaller
