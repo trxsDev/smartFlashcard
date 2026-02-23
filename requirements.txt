@@ -1,0 +1,7 @@
+opencv-python
+pygame-ce
+SpeechRecognition
+pyaudio
+ultralytics
+numpy
+tqdm
