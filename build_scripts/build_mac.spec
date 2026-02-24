@@ -9,7 +9,8 @@ a = Analysis(
     binaries=[],
     datas=[
         ('../assets', 'assets'),
-        ('../card_images', 'card_images')
+        ('../card_images/V2', 'card_images/V2'),
+        ('../card_images/*.jpg', 'card_images')
     ],
     hiddenimports=[
         'cv2', 'pygame', 'speech_recognition', 'numpy', 'requests'
@@ -29,13 +30,17 @@ pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 exe = EXE(
     pyz,
     a.scripts,
+    a.binaries,
+    a.zipfiles,
+    a.datas,
     [],
-    exclude_binaries=True,
     name='SmartFlashCard',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
+    upx_exclude=[],
+    runtime_tmpdir=None,
     console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
@@ -45,19 +50,8 @@ exe = EXE(
     icon='../assets/icons/app.icns'
 )
 
-coll = COLLECT(
-    exe,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
-    strip=False,
-    upx=True,
-    upx_exclude=[],
-    name='SmartFlashCard',
-)
-
 app = BUNDLE(
-    coll,
+    exe,
     name='SmartFlashCard.app',
     icon='../assets/icons/app.icns',
     bundle_identifier='com.smartflashcard.app',

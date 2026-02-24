@@ -105,7 +105,9 @@ class GameController:
         # Initialize Feature Matcher (SIFT)
         print("Loading SIFT Feature Matcher...")
         # Point to the source transparent flashcards
-        self.matcher = FeatureMatcher(get_resource_path("card_images")) 
+        # V1 = "card_images/V1"
+        V2 = "card_images/V2"
+        self.matcher = FeatureMatcher(get_resource_path(V2)) 
         print("Features loaded.")
 
         # Load UI Image Assets

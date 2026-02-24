@@ -18,7 +18,7 @@ def get_resource_path(relative_path):
     return os.path.join(base_path, relative_path)
 
 # --- Application Configuration ---
-APP_NAME = "บัตรภาพอัจฉริยะ V1.0"
+APP_NAME = "บัตรภาพอัจฉริยะ V1.1"
 WINDOW_WIDTH = 1280
 WINDOW_HEIGHT = 720
 FPS = 60
