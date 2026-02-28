@@ -9,8 +9,7 @@ a = Analysis(
     binaries=[],
     datas=[
         ('../assets', 'assets'),
-        ('../card_images/V2', 'card_images/V2'),
-        ('../card_images/*.jpg', 'card_images')
+        ('../card_images', 'card_images')
     ],
     hiddenimports=[
         'cv2', 'pygame', 'speech_recognition', 'numpy', 'requests'
