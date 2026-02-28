@@ -18,22 +18,72 @@ def get_resource_path(relative_path):
     return os.path.join(base_path, relative_path)
 
 # --- Application Configuration ---
-APP_NAME = "บัตรภาพอัจฉริยะ V1.1"
+APP_NAME = "บัตรภาพอัจฉริยะ V2.0"
 WINDOW_WIDTH = 1280
 WINDOW_HEIGHT = 720
 FPS = 60
 CONFIDENCE_THRESHOLD = 0.8
 
 # --- Flashcard Categories ---
-# Maps the Thai Category Name to the corresponding SIFT pattern image filename prefixes.
-# Add new cards here and drop the corresponding .jpg files into 'card_images/'
-CATEGORY_MAP = {
-    "เสื้อนักเรียน": ["b_shirt", "g_shirt"],
-    "กางเกง": ["b_short"],
-    "กระโปรง": ["g_skirt"],
-    "รองเท้า": ["b_shoe", "g_shoe"],
-    "ถุงเท้า": ["b_sock", "g_sock"]
+# Maps Units to their respective categories and SIFT pattern prefixes.
+# Unit 1: Clothing (เครื่องแต่งกาย)
+# Unit 2: Appliances (เครื่องใช้) - Placeholder
+UNIT_DATA = {
+    "Unit1": {
+        "title": "เครื่องแต่งกายพิ้นฐาน",
+        "cards": {
+            "เสื้อนักเรียน": {"patterns": ["b_shirt", "g_shirt"], "aliases": ["เสื้อ"]},
+            "กางเกง": {"patterns": ["b_short"], "aliases": []},
+            "กระโปรง": {"patterns": ["g_skirt"], "aliases": []},
+            "รองเท้า": {"patterns": ["b_shoe", "g_shoe"], "aliases": ["เท้า"]},
+            "ถุงเท้า": {"patterns": ["b_sock", "g_sock"], "aliases": []}
+        }
+    },
+    "Unit2": {
+        "title": "เครื่องแต่งกายเสริม",
+        "cards": {
+            "หมวก" : {"patterns": ["b_hat","g_hat"], "aliases": ["หมวกปีก"]},
+            "นาฬิกา" : {"patterns": ["watch"], "aliases": []},
+            "แว่นตา" : {"patterns": ["glasses"], "aliases": ["แว่น"]},
+            "กิ๊บ": {"patterns": ["clip"], "aliases": ["คลิป", "กิ๊บหนีบผม"]},
+            "ต่างหู": {"patterns": ["ear_ring"], "aliases": []},
+            "เข็มขัด": {"patterns": ["belt"], "aliases": []}
+        } 
+    },
+    "Unit3": { "title": "ทักษะการแต่งกาย", "cards": {
+        "การสวมใส่": {"patterns": [
+            "bst_wear","bss_wear","bs_wear",
+            "gss_wear","gst_wear",
+        ], "aliases": []},
+        "การถอด": {"patterns": ["gs_unwear","bs_unwear"], "aliases": []},
+        "การเปลี่ยนเสื้อผ้า": {"patterns": ["bc_cloth","gc_cloth"], "aliases": []},
+        "ความเรียบร้อย": {"patterns": ["bp","gp"], "aliases": []},
+    } },
+    "Unit4": { "title": "สีสันและลวดลาย", "cards": {
+        "เสื้อสีอ่อน": {"patterns": ["lw"], "aliases": []},
+        "เสื้อสีเข้ม": {"patterns": ["dw"], "aliases": []},
+        "เสื้อลายดอก": {"patterns": ["fw"], "aliases": []},
+        "เสื้อลายทาง": {"patterns": ["zw"], "aliases": []},
+    } },
+    "Unit5": { "title": "การดูแลรักษาเครื่องแต่งกาย", "cards": {
+        "เก็บเข้าตู้": {"patterns": ["kw","kwc"], "aliases": []},
+        "รีดผ้า": {"patterns": ["iw"], "aliases": []},
+        "พับผ้า": {"patterns": ["fdw"], "aliases": []},
+        "ตากผ้า": {"patterns": ["drw"], "aliases": []},
+        "ขจัดคราบ": {"patterns": ["ctw"], "aliases": []},
+        "ซักผ้า": {"patterns": ["cw"], "aliases": []},
+    } },
+    "Unit6": { "title": "การแต่งกายตามสภาพอากาศและโอกาสต่างๆ", "cards": {
+        "อากาศหนาว": {"patterns": ["cold"], "aliases": []},
+        "อากาศร้อน": {"patterns": ["hot"], "aliases": []},
+        "ฝนตก": {"patterns": ["rain"], "aliases": []},
+        "ไปวัด": {"patterns": ["gt"], "aliases": []},
+        "ไปโรงเรียน": {"patterns": ["gsc"], "aliases": []},
+        "ไปทะเล": {"patterns": ["gsa"], "aliases": []},
+        "ไปตลาด": {"patterns": ["gtm"], "aliases": []},
+    } }
 }
 
-# The Target Words that the game loop will iterate through
+# Default unit for backward compatibility or initial load
+CATEGORY_MAP = UNIT_DATA["Unit1"]["cards"]
 FLASHCARDS = list(CATEGORY_MAP.keys())

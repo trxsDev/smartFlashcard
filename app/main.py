@@ -10,7 +10,7 @@ import json
 import requests
 from enum import Enum, auto
 from feature_matcher import FeatureMatcher
-from config import APP_NAME, WINDOW_WIDTH, WINDOW_HEIGHT, FPS, CATEGORY_MAP, FLASHCARDS, get_resource_path
+from config import APP_NAME, WINDOW_WIDTH, WINDOW_HEIGHT, FPS, UNIT_DATA, get_resource_path
 
 
 # --- State Machine ---
@@ -31,6 +31,7 @@ class GameState(Enum):
     GAME_OVER = auto()       # Max mistakes reached
     END_SCREEN_FADE = auto() # Fade out to Game Over UI
     AUDIO_SETTINGS = auto()  # Settings overlay
+    PAUSED = auto()          # Pause menu during gameplay
 
 class GameController:
     def __init__(self):
@@ -89,6 +90,7 @@ class GameController:
         self.font_large = pygame.font.Font(font_bold, 60)
         self.font_medium = pygame.font.Font(font_bold, 40)
         self.font_small = pygame.font.Font(font_regular, 25)
+        self.font_tiny = pygame.font.Font(font_regular, 18)
 
         # Camera Setup Variables
         self.available_cameras = self.check_available_cameras()
@@ -104,11 +106,13 @@ class GameController:
         
         # Initialize Feature Matcher (SIFT)
         print("Loading SIFT Feature Matcher...")
-        # Point to the source transparent flashcards
-        # V1 = "card_images/V1"
-        V2 = "card_images/V2"
-        self.matcher = FeatureMatcher(get_resource_path(V2)) 
-        print("Features loaded.")
+        self.current_unit = "Unit1"
+        self.matcher = FeatureMatcher(get_resource_path(f"card_images/{self.current_unit}")) 
+        print(f"Features loaded for {self.current_unit}.")
+
+        # Load dynamic category maps and flashcards
+        self.category_map = UNIT_DATA[self.current_unit]["cards"]
+        self.flashcards = list(self.category_map.keys())
 
         # Load UI Image Assets
         try:
@@ -124,6 +128,16 @@ class GameController:
         self.icon_lock = pygame.transform.scale(pygame.image.load(get_resource_path("assets/ui/icons/lock_icon.png")).convert_alpha(), (60, 60))
         self.icon_wifi = pygame.transform.scale(pygame.image.load(get_resource_path("assets/ui/icons/wifi_check.png")).convert_alpha(), (80, 80))
 
+        # Load custom chapter buttons if available
+        self.chapter_buttons = {}
+        for i in range(1, 7):
+            try:
+                # Expected to be 240x160
+                btn_img = pygame.image.load(get_resource_path(f"assets/ui/buttons/unit{i}_btn.png")).convert_alpha()
+                self.chapter_buttons[i] = pygame.transform.scale(btn_img, (240, 160))
+            except:
+                pass
+
         # Initialize Speech Recognition
         self.recognizer = sr.Recognizer()
         # We will instantiate microphone per thread to avoid context manager assertion errors
@@ -137,12 +151,13 @@ class GameController:
         self.current_state = GameState.SPLASH_SCREEN # Start with Splash Screen
         self.splash_start_time = time.time()
         self.current_card_index = 0
-        self.play_sequence = list(FLASHCARDS)
-        self.target_category = self.play_sequence[self.current_card_index]
+        self.play_sequence = list(self.flashcards)
+        self.target_category = self.play_sequence[self.current_card_index] if self.play_sequence else ""
         self.target_word_thai = self.target_category
     
         self.is_random_mode = False
     
+        self.pre_pause_state = None # To return to previous state after unpausing
         self.mistakes = 0
         self.spelling_start_time = 0
         self.countdown_start_time = 0
@@ -254,13 +269,24 @@ class GameController:
     def start_game(self):
         # Reset game values
         import random
-        self.play_sequence = list(FLASHCARDS)
+        self.current_card_index = 0
+        self.category_map = UNIT_DATA[self.current_unit]["cards"]
+        self.flashcards = list(self.category_map.keys())
+        self.play_sequence = list(self.flashcards)
+        
+        if not self.play_sequence:
+            print(f"Warning: No cards found for {self.current_unit}")
+            # Optional: handle empty unit case
+            
         if self.is_random_mode:
             random.shuffle(self.play_sequence)
             
-        self.current_card_index = 0
-        self.target_category = self.play_sequence[self.current_card_index]
-        self.target_word_thai = self.target_category
+        if self.play_sequence:
+            self.target_category = self.play_sequence[self.current_card_index]
+            self.target_word_thai = self.target_category
+        else:
+            self.target_category = ""
+            self.target_word_thai = ""
         self.mistakes = 0
         self.feedback_message = ""
         
@@ -320,17 +346,31 @@ class GameController:
         print("THREAD: Starting listening...")
         with sr.Microphone() as source:
             try:
-                # Adjust for ambient noise only when we start listening to a new word/session
-                # self.recognizer.adjust_for_ambient_noise(source, duration=0.5)
+                # Adjust for ambient noise to handle room background noise
+                self.recognizer.adjust_for_ambient_noise(source, duration=0.8)
                 
-                audio = self.recognizer.listen(source, timeout=3, phrase_time_limit=3)
+                # Increased timeout and phrase limit for slower speakers/thinking time
+                audio = self.recognizer.listen(source, timeout=5, phrase_time_limit=5)
                 print("THREAD: Processing audio...")
                 try:
                     text = self.recognizer.recognize_google(audio, language="th-TH")
                     print(f"THREAD: Heard '{text}'")
                     self.last_speech_result = text
                     
+                    # Modern Check: Check if target word OR any aliases are in the result
+                    target_info = self.category_map.get(self.target_word_thai, {})
+                    aliases = target_info.get("aliases", [])
+                    
+                    is_correct = False
                     if self.target_word_thai in text:
+                        is_correct = True
+                    else:
+                        for alias in aliases:
+                            if alias in text:
+                                is_correct = True
+                                break
+
+                    if is_correct:
                         if self.sfx_correct: self.sfx_correct.play()
                         self.feedback_message = "ถูกต้อง!"
                         time.sleep(1) 
@@ -357,6 +397,10 @@ class GameController:
                 print("THREAD: Finished.")
 
     def update(self):
+        # 0. If paused, don't update camera or logic
+        if self.current_state == GameState.PAUSED:
+            return
+
         # 1. Capture Camera Frame (Only if game is actively using it or in Step 1 config)
         if self.current_state not in [GameState.SETTINGS_SCREEN_STEP_2, GameState.LANDING_PAGE, GameState.CHAPTER_SELECT, GameState.GAME_OVER, GameState.AUDIO_SETTINGS]:
             if self.cap and self.cap.isOpened():
@@ -403,10 +447,13 @@ class GameController:
                 pts = result['polygon']
                 detect_class = result['class_name']
                 
-                # Draw the polygon matched area
-                cv2.polylines(frame, [pts], True, (0, 255, 0), 3, cv2.LINE_AA)
-                
                 # Check if the detected class is one of the valid classes for the current target category
+                valid_patterns = self.category_map.get(self.target_category, {}).get("patterns", [])
+                is_target = detect_class in valid_patterns
+                
+                # Draw the polygon matched area (Green if correct, Red if wrong)
+                box_color = (0, 255, 0) if is_target else (0, 0, 255) # OpenCV uses BGR
+                cv2.polylines(frame, [pts], True, box_color, 3, cv2.LINE_AA)
                 
                 # Temporal Cross-Check: Add to history
                 self.tracking_history.append(detect_class)
@@ -418,7 +465,7 @@ class GameController:
                              all(c == detect_class for c in self.tracking_history))
 
                 if is_stable:
-                    if detect_class in CATEGORY_MAP[self.target_category]:
+                    if is_target:
                         if self.current_state == GameState.SCANNING:
                             if self.sfx_correct: self.sfx_correct.play()
                             self.current_state = GameState.COUNTDOWN
@@ -658,24 +705,70 @@ class GameController:
             start_x = WINDOW_WIDTH // 2 - 400
             start_y = WINDOW_HEIGHT // 2 - 150
             for i in range(6):
+                unit_id = f"Unit{i+1}"
+                unit_info = UNIT_DATA.get(unit_id, {"title": f"Unit {i+1}", "cards": {}})
+                
                 x = start_x + (i % 3) * 280
                 y = start_y + (i // 3) * 200
                 rect = pygame.Rect(x, y, 240, 160)
                 
-                if i == 0: # Chapter 1 Active
-                    self.draw_panel(rect, base_color=(200, 250, 220), border_color=(100, 200, 120))
-                    ch_text = self.font_large.render("1", True, (80, 180, 100))
-                    sub_text = self.font_small.render("เครื่องแต่งกาย", True, (50, 100, 50))
-                else: # Locked Chapters
-                    self.draw_panel(rect, base_color=(220, 220, 220), border_color=(150, 150, 150))
-                    ch_text = self.font_large.render(f"{i+1}", True, (150, 150, 150))
-                    sub_text = self.font_small.render("Locked", True, (120, 120, 120))
+                # Check if unit has cards to decide color
+                has_cards = len(unit_info["cards"]) > 0
                 
-                self.screen.blit(ch_text, ch_text.get_rect(center=(x+120, y+60)))
-                self.screen.blit(sub_text, sub_text.get_rect(center=(x+120, y+120)))
+                # Hover sound logic
+                mpos = self.get_logical_mouse_pos()
+                is_hovered = rect.collidepoint(mpos)
+                button_id = f"chap_btn_{i}"
+                if is_hovered:
+                    if button_id not in self.hovered_buttons:
+                        if self.sfx_hover: self.sfx_hover.play()
+                        self.hovered_buttons.add(button_id)
+                else:
+                    self.hovered_buttons.discard(button_id)
                 
-                # Draw lock icon on top of text for locked chapters
-                if i != 0:
+                if (i + 1) in self.chapter_buttons:
+                    btn_img = self.chapter_buttons[i + 1]
+                    
+                    # Draw custom image shadow
+                    shadow = btn_img.copy()
+                    # Fill with black to make it dark, keeping original alpha
+                    shadow.fill((0, 0, 0, 150), special_flags=pygame.BLEND_RGBA_MULT) 
+                    self.screen.blit(shadow, (x + 4, y + 6))
+                    
+                    # Draw custom image
+                    self.screen.blit(btn_img, (x, y))
+                    
+                    # Optional: adding a dark overlay if the unit has no cards
+                    if not has_cards:
+                        dark_overlay = pygame.Surface((240, 160), pygame.SRCALPHA)
+                        dark_overlay.fill((0, 0, 0, 100))
+                        self.screen.blit(dark_overlay, (x, y))
+                else:
+                    base_col = (200, 250, 220) if has_cards else (240, 240, 240)
+                    border_col = (100, 200, 120) if has_cards else (200, 200, 200)
+                    
+                    self.draw_panel(rect, base_color=base_col, border_color=border_col)
+                    
+                    # Chapter number
+                    ch_text = self.font_large.render(str(i+1), True, (80, 180, 100) if has_cards else (150, 150, 150))
+                    # Chapter title
+                    title_text = unit_info["title"]
+                    if len(title_text) > 18:
+                        import textwrap
+                        # Use Thai logic friendly split if possible, but textwrap width=18 usually works for this case
+                        wrapped_lines = textwrap.wrap(title_text, width=22)
+                        y_offset = y + 100
+                        for line in wrapped_lines:
+                            sub_text = self.font_tiny.render(line, True, (50, 100, 50) if has_cards else (120, 120, 120))
+                            self.screen.blit(sub_text, sub_text.get_rect(center=(x+120, y_offset)))
+                            y_offset += 22
+                    else:
+                        sub_text = self.font_small.render(title_text, True, (50, 100, 50) if has_cards else (120, 120, 120))
+                        self.screen.blit(sub_text, sub_text.get_rect(center=(x+120, y+120)))
+                        
+                    self.screen.blit(ch_text, ch_text.get_rect(center=(x+120, y+60)))
+                
+                if not has_cards:
                     lock_rect = self.icon_lock.get_rect(center=(x+120, y+80))
                     self.screen.blit(self.icon_lock, lock_rect)
 
@@ -751,6 +844,28 @@ class GameController:
             btn_back.center = (WINDOW_WIDTH // 2, WINDOW_HEIGHT // 2 + 210)
             self.draw_bubbly_button("กลับ", btn_back, color=(150, 150, 150))
 
+        elif self.current_state == GameState.PAUSED:
+            # Semi-transparent overlay over the gameplay
+            overlay = pygame.Surface((WINDOW_WIDTH, WINDOW_HEIGHT), pygame.SRCALPHA)
+            overlay.fill((0, 0, 0, 150))
+            self.screen.blit(overlay, (0, 0))
+            
+            panel_rect = pygame.Rect(0, 0, 500, 400)
+            panel_rect.center = (WINDOW_WIDTH // 2, WINDOW_HEIGHT // 2)
+            self.draw_panel(panel_rect, base_color=(250, 240, 210), border_color=(210, 50, 80))
+            
+            self.draw_text_centered("หยุดพักชั่วคราว", self.font_large, (210, 50, 80), -120)
+            
+            # Resume Button
+            btn_resume = pygame.Rect(0, 0, 300, 70)
+            btn_resume.center = (WINDOW_WIDTH // 2, WINDOW_HEIGHT // 2 - 10)
+            self.draw_bubbly_button("เล่นต่อ", btn_resume, color=(100, 220, 100))
+            
+            # Quit to Main Menu Button
+            btn_quit = pygame.Rect(0, 0, 300, 70)
+            btn_quit.center = (WINDOW_WIDTH // 2, WINDOW_HEIGHT // 2 + 80)
+            self.draw_bubbly_button("ออกจากเกม", btn_quit, color=(255, 100, 100))
+
         elif self.current_state == GameState.PRE_GAME_FADE:
             # Cream colored cover overlay (matching panel background)
             fade_surf = pygame.Surface((WINDOW_WIDTH, WINDOW_HEIGHT))
@@ -769,7 +884,7 @@ class GameController:
             self.screen.blit(fade_surf, (0, 0))
 
         elif self.current_state == GameState.GAME_OVER:
-            reason = "เก่งมากก!" if self.current_card_index >= len(FLASHCARDS) else "END (Game Over)"
+            reason = "เก่งมากก!" if self.current_card_index >= len(self.play_sequence) else "END (Game Over)"
             self.draw_text_centered(reason, self.font_large, (255, 200, 50), -50, (0,0,0,200))
             btn_rect = pygame.Rect(0, 0, 300, 80)
             btn_rect.center = (WINDOW_WIDTH // 2, WINDOW_HEIGHT // 2 + 100)
@@ -778,7 +893,7 @@ class GameController:
         else: # Regular In-Game HUDs
             # Top Header Background
             header_bg = pygame.Surface((WINDOW_WIDTH, 80), pygame.SRCALPHA)
-            header_bg.fill((0, 0, 0, 180))
+            header_bg.fill((210, 51, 80, 180))
             self.screen.blit(header_bg, (0, 0))
             
             # Game Header Update - Progress UI
@@ -963,14 +1078,29 @@ class GameController:
                 click_handled = True
                 
         elif self.current_state == GameState.CHAPTER_SELECT:
-            # Check chapter 1 click
             start_x = WINDOW_WIDTH // 2 - 400
             start_y = WINDOW_HEIGHT // 2 - 150
-            ch1_rect = pygame.Rect(start_x, start_y, 240, 160)
-            
-            if ch1_rect.collidepoint(lpos):
-                self.current_state = GameState.MODE_SELECT
-                click_handled = True
+            for i in range(6):
+                x = start_x + (i % 3) * 280
+                y = start_y + (i // 3) * 200
+                btn_rect = pygame.Rect(x, y, 240, 160)
+                
+                if btn_rect.collidepoint(lpos):
+                    unit_id = f"Unit{i+1}"
+                    # Only allow selection if there are cards (or allow it but show empty)
+                    # For now, let's allow selection if not empty or just allow it and see
+                    self.current_unit = unit_id
+                    
+                    # Reload Matcher for the new unit
+                    print(f"Switching to {unit_id}...")
+                    self.matcher = FeatureMatcher(get_resource_path(f"card_images/{unit_id}"))
+                    self.category_map = UNIT_DATA[unit_id]["cards"]
+                    # Sequence should be the Thai keys
+                    self.flashcards = list(self.category_map.keys())
+                    
+                    self.current_state = GameState.MODE_SELECT
+                    click_handled = True
+                    break
                 
         elif self.current_state == GameState.MODE_SELECT:
             btn_start_rect = pygame.Rect(0, 0, 360, 80)
@@ -997,6 +1127,22 @@ class GameController:
             elif btn_back_rect.collidepoint(lpos):
                 click_handled = True
                 self.current_state = GameState.CHAPTER_SELECT
+
+        elif self.current_state == GameState.PAUSED:
+            btn_resume = pygame.Rect(0, 0, 300, 70)
+            btn_resume.center = (WINDOW_WIDTH // 2, WINDOW_HEIGHT // 2 - 10)
+            
+            btn_quit = pygame.Rect(0, 0, 300, 70)
+            btn_quit.center = (WINDOW_WIDTH // 2, WINDOW_HEIGHT // 2 + 80)
+            
+            if btn_resume.collidepoint(lpos):
+                self.current_state = self.pre_pause_state
+                click_handled = True
+            elif btn_quit.collidepoint(lpos):
+                self.release_camera()
+                self.current_state = GameState.LANDING_PAGE
+                pygame.mixer.music.set_volume(self.bgm_volume * 0.2)
+                click_handled = True
 
         elif self.current_state == GameState.GAME_OVER:
             btn_rect = pygame.Rect(0, 0, 300, 80)
@@ -1033,7 +1179,20 @@ class GameController:
 
                 elif event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_ESCAPE:
-                        if self.current_state in [GameState.CHAPTER_SELECT, GameState.GAME_OVER]:
+                        # NEW: Handle ESC based on context
+                        # If in gameplay (not in menu/setup), show PAUSE modal
+                        gameplay_states = [
+                            GameState.SCANNING, GameState.WRONG_OBJECT, 
+                            GameState.COUNTDOWN, GameState.READING_AND_SPELLING, 
+                            GameState.COUNTDOWN_PRE_LISTEN, GameState.LISTENING
+                        ]
+                        
+                        if self.current_state in gameplay_states:
+                            self.pre_pause_state = self.current_state
+                            self.current_state = GameState.PAUSED
+                        elif self.current_state == GameState.PAUSED:
+                            self.current_state = self.pre_pause_state
+                        elif self.current_state in [GameState.CHAPTER_SELECT, GameState.GAME_OVER, GameState.MODE_SELECT, GameState.AUDIO_SETTINGS]:
                             self.current_state = GameState.LANDING_PAGE
                         else:
                             self.running = False
