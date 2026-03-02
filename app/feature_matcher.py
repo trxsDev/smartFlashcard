@@ -8,13 +8,14 @@ class FeatureMatcher:
         # Standard/slightly sensitive SIFT to avoid capturing noise
         self.sift = cv2.SIFT_create(contrastThreshold=0.03, edgeThreshold=10)
         self.references = {}
-        # MIN_MATCH_COUNT: Needs to be high enough to prevent false positives from similar shapes (like shirts vs socks)
-        self.MIN_MATCH_COUNT = 18
+        # MIN_MATCH_COUNT: Increased to 25 for stricter matching (requires more points to confirm)
+        self.MIN_MATCH_COUNT = 25
         
         # Initialize FLANN matcher
         FLANN_INDEX_KDTREE = 1
         index_params = dict(algorithm=FLANN_INDEX_KDTREE, trees=5)
-        search_params = dict(checks=50)
+        # Increased checks to 100 for more accurate (but slightly slower) matching
+        search_params = dict(checks=100)
         self.flann = cv2.FlannBasedMatcher(index_params, search_params)
 
         print(f"FeatureMatcher: Loading references from {source_dir}...")
@@ -98,12 +99,12 @@ class FeatureMatcher:
             except Exception as e:
                 continue
             
-            # Lowe's ratio test - stricter ratio to filter weak matches (reduce from 0.75 down to 0.65 for high accuracy)
+            # Lowe's ratio test - stricter ratio to filter weak matches (reduce from 0.65 down to 0.60 for high accuracy)
             good_matches = []
             for match_tuple in matches:
                 if len(match_tuple) == 2:
                     m, n = match_tuple
-                    if m.distance < 0.65 * n.distance:
+                    if m.distance < 0.60 * n.distance:
                         good_matches.append(m)
             
             if len(good_matches) > self.MIN_MATCH_COUNT and len(good_matches) > best_match_count:

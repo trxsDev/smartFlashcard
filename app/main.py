@@ -8,6 +8,7 @@ import sys
 import numpy as np
 import json
 import requests
+import difflib
 from enum import Enum, auto
 from feature_matcher import FeatureMatcher
 from config import APP_NAME, WINDOW_WIDTH, WINDOW_HEIGHT, FPS, UNIT_DATA, get_resource_path
@@ -60,6 +61,7 @@ class GameController:
             self.sfx_click = pygame.mixer.Sound(get_resource_path("assets/sfx/click.mp3"))
             self.sfx_new_word = pygame.mixer.Sound(get_resource_path("assets/sfx/new_word.mp3"))
             self.sfx_game_over = pygame.mixer.Sound(get_resource_path("assets/sfx/game_over.mp3"))
+            self.sfx_fail = pygame.mixer.Sound(get_resource_path("assets/sfx/faild.mp3"))
         except:
             self.sfx_correct = None
             self.sfx_wrong = None
@@ -67,6 +69,7 @@ class GameController:
             self.sfx_click = None
             self.sfx_new_word = None
             self.sfx_game_over = None
+            self.sfx_fail = None
 
         self.bgm_volume = 0.5
         self.sfx_volume = 0.8
@@ -159,6 +162,8 @@ class GameController:
     
         self.pre_pause_state = None # To return to previous state after unpausing
         self.mistakes = 0
+        self.score = 0
+        self.total_cards = 0
         self.spelling_start_time = 0
         self.countdown_start_time = 0
         self.wrong_object_timer = 0
@@ -193,6 +198,7 @@ class GameController:
         if self.sfx_click: self.sfx_click.set_volume(vol)
         if self.sfx_new_word: self.sfx_new_word.set_volume(vol)
         if self.sfx_game_over: self.sfx_game_over.set_volume(vol)
+        if self.sfx_fail: self.sfx_fail.set_volume(vol)
 
     def get_logical_mouse_pos(self):
         win_w, win_h = self.window.get_size()
@@ -284,10 +290,13 @@ class GameController:
         if self.play_sequence:
             self.target_category = self.play_sequence[self.current_card_index]
             self.target_word_thai = self.target_category
+            self.total_cards = len(self.play_sequence)
         else:
             self.target_category = ""
             self.target_word_thai = ""
+            self.total_cards = 0
         self.mistakes = 0
+        self.score = 0
         self.feedback_message = ""
         
         # Power on Camera
@@ -305,11 +314,23 @@ class GameController:
     def next_card(self):
         self.current_card_index += 1
         if self.current_card_index >= len(self.play_sequence):
+            # Stop BGM when game is over
+            pygame.mixer.music.stop()
+            
             self.current_state = GameState.END_SCREEN_FADE
             self.fade_alpha = 0
             self.fade_start_time = time.time()
-            self.feedback_message = "คุณเก่งมาก! เรียนรู้ครบทุกคำแล้ว"
-            if self.sfx_game_over: self.sfx_game_over.play()
+            self.feedback_message = ""
+            
+            # Determine audio based on score threshold
+            accuracy = 0
+            if self.total_cards > 0:
+                accuracy = (self.score / self.total_cards) * 100
+                
+            if accuracy >= 75:
+                if self.sfx_game_over: self.sfx_game_over.play()
+            else:
+                if self.sfx_fail: self.sfx_fail.play()
             return
 
         if self.sfx_new_word: self.sfx_new_word.play()
@@ -344,10 +365,19 @@ class GameController:
     def listen_speech_worker(self):
         """Threaded function for speech recognition to prevent blocking"""
         print("THREAD: Starting listening...")
+        # Pause BGM so it doesn't interfere with the microphone
+        pygame.mixer.music.pause()
+        
         with sr.Microphone() as source:
             try:
                 # Adjust for ambient noise to handle room background noise
                 self.recognizer.adjust_for_ambient_noise(source, duration=0.8)
+                
+                # Force a lower threshold for soft speakers (default is ~300) 
+                # but keep dynamic adjustments enabled
+                if self.recognizer.energy_threshold > 250:
+                    self.recognizer.energy_threshold = 250
+                self.recognizer.dynamic_energy_threshold = True
                 
                 # Increased timeout and phrase limit for slower speakers/thinking time
                 audio = self.recognizer.listen(source, timeout=5, phrase_time_limit=5)
@@ -362,24 +392,39 @@ class GameController:
                     aliases = target_info.get("aliases", [])
                     
                     is_correct = False
-                    if self.target_word_thai in text:
+                    
+                    def is_match(target, spoken):
+                        # 1. Exact or Substring match (e.g., spoken sentence contains the target word)
+                        if target in spoken:
+                            return True
+                        # 2. Fuzzy match (e.g., "กะทะ" instead of "กระทะ") - 60% similarity threshold
+                        similarity = difflib.SequenceMatcher(None, target, spoken).ratio()
+                        return similarity >= 0.60
+
+                    if is_match(self.target_word_thai, text):
                         is_correct = True
                     else:
                         for alias in aliases:
-                            if alias in text:
+                            if is_match(alias, text):
                                 is_correct = True
                                 break
 
                     if is_correct:
                         if self.sfx_correct: self.sfx_correct.play()
-                        self.feedback_message = "ถูกต้อง!"
+                        self.score += 1
+                        self.feedback_message = "ถูกต้อง! +1 คะแนน"
                         time.sleep(1) 
                         self.next_card()
                     else:
-                        self.trigger_wrong_action(f"ลองอีกครั้ง! (ได้ยิน: {text})")
-                        if self.current_state != GameState.GAME_OVER:
-                            self.current_state = GameState.COUNTDOWN_PRE_LISTEN
-                            self.countdown_start_time = time.time()
+                        if self.mistakes >= 1: # This is the 2nd mistake (0-indexed effectively since we'll trigger)
+                            self.trigger_wrong_action(f"หมดโควต้าแล้ว! ข้ามไปคำถัดไปเลยนะ")
+                            time.sleep(1.5)
+                            self.next_card()
+                        else:
+                            self.trigger_wrong_action(f"ลองอีกครั้ง! (ได้ยิน: {text})")
+                            if self.current_state != GameState.GAME_OVER:
+                                self.current_state = GameState.COUNTDOWN_PRE_LISTEN
+                                self.countdown_start_time = time.time()
                 
                 except sr.UnknownValueError:
                     print("THREAD: Could not understand audio")
@@ -394,6 +439,9 @@ class GameController:
                 print(f"THREAD: Error: {e}")
             finally:
                 self.is_listening = False 
+                # Resume BGM if we haven't transitioned to Game Over
+                if self.current_state != GameState.GAME_OVER and self.current_state != GameState.END_SCREEN_FADE:
+                    pygame.mixer.music.unpause()
                 print("THREAD: Finished.")
 
     def update(self):
@@ -884,10 +932,35 @@ class GameController:
             self.screen.blit(fade_surf, (0, 0))
 
         elif self.current_state == GameState.GAME_OVER:
-            reason = "เก่งมากก!" if self.current_card_index >= len(self.play_sequence) else "END (Game Over)"
-            self.draw_text_centered(reason, self.font_large, (255, 200, 50), -50, (0,0,0,200))
+            panel_rect = pygame.Rect(0, 0, 700, 500)
+            panel_rect.center = (WINDOW_WIDTH // 2, WINDOW_HEIGHT // 2)
+            self.draw_panel(panel_rect)
+            
+            # Calculate accuracy
+            accuracy = 0
+            if self.total_cards > 0:
+                accuracy = (self.score / self.total_cards) * 100
+                
+            # Score Text
+            score_text = f"คะแนน: {self.score} / {self.total_cards}"
+            self.draw_text_centered(score_text, self.font_large, (50, 50, 200), -150)
+            
+            # Message based on 75% threshold
+            if accuracy >= 75:
+                msg1 = "เก่งมาก!"
+                msg2 = "ยอดเยี่ยมไปเลย"
+                color = (50, 200, 50) # Green
+            else:
+                msg1 = "พยายามอีกนิดนะ!"
+                msg2 = "สู้ๆ"
+                color = (255, 100, 50) # Orange
+                
+            self.draw_text_centered(msg1, self.font_title, color, -40)
+            self.draw_text_centered(msg2, self.font_medium, color, 40)
+            
+            # Button
             btn_rect = pygame.Rect(0, 0, 300, 80)
-            btn_rect.center = (WINDOW_WIDTH // 2, WINDOW_HEIGHT // 2 + 100)
+            btn_rect.center = (WINDOW_WIDTH // 2, WINDOW_HEIGHT // 2 + 160)
             self.draw_bubbly_button("กลับหน้าหลัก", btn_rect, color=(80, 200, 255))
         
         else: # Regular In-Game HUDs
@@ -956,7 +1029,7 @@ class GameController:
 
             if self.feedback_message and self.current_state != GameState.GAME_OVER:
                 color = (0, 255, 0) if "ถูกต้อง" in self.feedback_message else (255, 100, 100)
-                msg = f"{self.feedback_message} (พลาดได้อีก {3 - self.mistakes} ครั้ง)" if self.mistakes > 0 else self.feedback_message
+                msg = f"{self.feedback_message} (พลาดได้อีก {2 - self.mistakes} ครั้ง)" if self.mistakes > 0 else self.feedback_message
                 self.draw_text_centered(msg, self.font_medium, color, 100, (0,0,0,200))
 
         # Scale and blit the internal surface onto the actual window
@@ -1146,11 +1219,13 @@ class GameController:
 
         elif self.current_state == GameState.GAME_OVER:
             btn_rect = pygame.Rect(0, 0, 300, 80)
-            btn_rect.center = (WINDOW_WIDTH // 2, WINDOW_HEIGHT // 2 + 100)
+            btn_rect.center = (WINDOW_WIDTH // 2, WINDOW_HEIGHT // 2 + 160)
+            
             if btn_rect.collidepoint(lpos):
                 click_handled = True
                 self.current_state = GameState.LANDING_PAGE
-                pygame.mixer.music.set_volume(self.bgm_volume * 0.2) # Restore BGM after game
+                pygame.mixer.music.play(-1) # Restart BGM after game
+                pygame.mixer.music.set_volume(self.bgm_volume * 0.2)
                 
         if click_handled and self.sfx_click:
             self.sfx_click.play()
@@ -1196,6 +1271,30 @@ class GameController:
                             self.current_state = GameState.LANDING_PAGE
                         else:
                             self.running = False
+                            
+                    elif event.key == pygame.K_w:
+                        # Hidden Bypass: Force Win
+                        gameplay_states = [GameState.SCANNING, GameState.WRONG_OBJECT, GameState.COUNTDOWN, GameState.READING_AND_SPELLING, GameState.COUNTDOWN_PRE_LISTEN, GameState.LISTENING]
+                        if self.current_state in gameplay_states:
+                            pygame.mixer.music.stop()
+                            self.score = self.total_cards
+                            self.current_state = GameState.END_SCREEN_FADE
+                            self.fade_alpha = 0
+                            self.fade_start_time = time.time()
+                            self.feedback_message = ""
+                            if self.sfx_game_over: self.sfx_game_over.play()
+                            
+                    elif event.key == pygame.K_l:
+                        # Hidden Bypass: Force Loss
+                        gameplay_states = [GameState.SCANNING, GameState.WRONG_OBJECT, GameState.COUNTDOWN, GameState.READING_AND_SPELLING, GameState.COUNTDOWN_PRE_LISTEN, GameState.LISTENING]
+                        if self.current_state in gameplay_states:
+                            pygame.mixer.music.stop()
+                            self.score = 0
+                            self.current_state = GameState.END_SCREEN_FADE
+                            self.fade_alpha = 0
+                            self.fade_start_time = time.time()
+                            self.feedback_message = ""
+                            if self.sfx_fail: self.sfx_fail.play()
                     
                     if self.current_state == GameState.SETTINGS_SCREEN_STEP_1:
                         if event.key == pygame.K_RETURN:
@@ -1236,6 +1335,8 @@ class GameController:
                     elif self.current_state == GameState.GAME_OVER:
                         if event.key == pygame.K_RETURN:
                             self.current_state = GameState.LANDING_PAGE
+                            pygame.mixer.music.play(-1) # Restart BGM
+                            pygame.mixer.music.set_volume(self.bgm_volume * 0.2)
 
             self.update()
             self.draw()

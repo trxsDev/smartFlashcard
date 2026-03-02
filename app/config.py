@@ -18,7 +18,7 @@ def get_resource_path(relative_path):
     return os.path.join(base_path, relative_path)
 
 # --- Application Configuration ---
-APP_NAME = "บัตรภาพอัจฉริยะ V2.0"
+APP_NAME = "Smart Card Scanner (SCS) V2.1"
 WINDOW_WIDTH = 1280
 WINDOW_HEIGHT = 720
 FPS = 60
