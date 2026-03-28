@@ -21,7 +21,7 @@ def get_resource_path(relative_path):
 APP_NAME = "Smart Card Scanner (SCS) V2.1"
 WINDOW_WIDTH = 1280
 WINDOW_HEIGHT = 720
-FPS = 60
+FPS = 30
 CONFIDENCE_THRESHOLD = 0.8
 
 # --- Flashcard Categories ---

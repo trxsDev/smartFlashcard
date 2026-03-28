@@ -355,9 +355,13 @@ class GameController:
         """Threaded function for running SIFT prediction without blocking UI"""
         while self.running:
             if self.current_state == GameState.SCANNING and self.current_scan_frame is not None:
+                # Targeted Scanning: Only look for patterns of the current target card
+                target_info = self.category_map.get(self.target_category, {})
+                patterns = target_info.get("patterns", [])
+                
                 # Predict on the latest captured frame copy
                 frame_to_scan = self.current_scan_frame.copy()
-                self.last_scan_result = self.matcher.predict(frame_to_scan, target_class=None)
+                self.last_scan_result = self.matcher.predict(frame_to_scan, target_classes=patterns)
                 time.sleep(0.1) # Max ~10 FPS for the detector to save CPU
             else:
                 time.sleep(0.05)

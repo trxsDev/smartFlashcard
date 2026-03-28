@@ -66,13 +66,24 @@ class FeatureMatcher:
                     'dims': img_gray.shape # (h, w)
                 }
 
-    def predict(self, frame_bgr, target_class=None):
+    def predict(self, frame_bgr, target_classes=None):
         """
-        Attempts to find a target class in the given frame using SIFT.
+        Attempts to find target classes in the given frame using SIFT.
         Returns a detection dict if found, else None.
-        If target_class is specified, it only searches for that class to speed it up.
+        If target_classes is a list, it only searches for those classes to speed it up.
         """
-        frame_gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
+        # --- Optimization: Downscale frame for faster SIFT detection ---
+        # 720p is too much for low-spec machines. 640px wide is enough for flashcards.
+        max_proc_dim = 640
+        h_orig, w_orig = frame_bgr.shape[:2]
+        if max(h_orig, w_orig) > max_proc_dim:
+            scale = max_proc_dim / float(max(h_orig, w_orig))
+            frame_resized = cv2.resize(frame_bgr, None, fx=scale, fy=scale)
+        else:
+            scale = 1.0
+            frame_resized = frame_bgr
+            
+        frame_gray = cv2.cvtColor(frame_resized, cv2.COLOR_BGR2GRAY)
         kp_frame, des_frame = self.sift.detectAndCompute(frame_gray, None)
         
         if des_frame is None or len(des_frame) == 0:
@@ -82,7 +93,14 @@ class FeatureMatcher:
         best_match_count = -1
         best_dst = None
         
-        classes_to_check = [target_class] if target_class else self.references.keys()
+        # Determine which reference classes to check
+        if target_classes:
+            if isinstance(target_classes, str):
+                classes_to_check = [target_classes]
+            else:
+                classes_to_check = target_classes # Already a list
+        else:
+            classes_to_check = self.references.keys()
         
         for cls_name in classes_to_check:
             if cls_name not in self.references:
@@ -137,7 +155,7 @@ class FeatureMatcher:
                                 
                                 # 2. Area Check (preventing extremely tiny or massive matches from noise)
                                 box_area = w_box * h_box
-                                frame_area = frame_bgr.shape[0] * frame_bgr.shape[1]
+                                frame_area = frame_resized.shape[0] * frame_resized.shape[1]
                                 area_ratio = box_area / float(frame_area)
                                 
                                 # Only accept if aspect ratio is within 50% error and area is at least 1% of frame
@@ -147,14 +165,16 @@ class FeatureMatcher:
                                     best_dst = dst
         
         if best_match_class and best_dst is not None:
-            # Convert polygon back to bounding box for YOLO-like compatibility
-            pts = np.int32(best_dst).reshape(-1, 2)
-            x, y, w, h = cv2.boundingRect(pts)
+            # --- Map coordinates back to the original full resolution frame ---
+            best_dst_orig = best_dst / scale
+            pts_orig = np.int32(best_dst_orig).reshape(-1, 2)
+            x, y, w, h = cv2.boundingRect(pts_orig)
+            
             return {
                 "class_name": best_match_class,
                 "bbox": (x, y, x + w, y + h),
                 "inliers": best_match_count,
-                "polygon": pts
+                "polygon": pts_orig
             }
             
         return None
