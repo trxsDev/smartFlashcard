@@ -416,7 +416,7 @@ class GameController:
                         time.sleep(1) 
                         self.next_card()
                     else:
-                        if self.mistakes >= 1: # This is the 2nd mistake (0-indexed effectively since we'll trigger)
+                        if self.mistakes >= 2: # This is the 3rd mistake (0, 1, 2)
                             self.trigger_wrong_action(f"หมดโควต้าแล้ว! ข้ามไปคำถัดไปเลยนะ")
                             time.sleep(1.5)
                             self.next_card()
@@ -429,9 +429,29 @@ class GameController:
                 except sr.UnknownValueError:
                     print("THREAD: Could not understand audio")
                     self.feedback_message = "???"
+                    # Deduct life for "???" as requested to speed up the game
+                    if self.mistakes >= 2: # 3rd mistake
+                        self.trigger_wrong_action(f"ฟังไม่ชัด! หมดโควต้าแล้ว ข้ามไปคำถัดไปนะ")
+                        time.sleep(1.5)
+                        self.next_card()
+                    else:
+                        self.trigger_wrong_action(f"ฟังไม่ชัด! โปรดลองอีกครั้ง (???)")
+                        if self.current_state != GameState.GAME_OVER:
+                            self.current_state = GameState.COUNTDOWN_PRE_LISTEN
+                            self.countdown_start_time = time.time()
                 except sr.RequestError as e:
                     print(f"THREAD: Request error; {e}")
-                    self.feedback_message = "ข้อผิดพลาดระบบเครือข่าย"
+                    self.feedback_message = "ข้อผิดพลาดเครือข่าย"
+                    # Network error but we still treat it as a try to prevent infinite wait
+                    if self.mistakes >= 2:
+                        self.trigger_wrong_action("ปัญหาเครือข่าย! ข้ามไปก่อนนะ")
+                        time.sleep(1.5)
+                        self.next_card()
+                    else:
+                        self.trigger_wrong_action("ปัญหาเครือข่าย! ลองใหม่อีกครั้ง")
+                        if self.current_state != GameState.GAME_OVER:
+                            self.current_state = GameState.COUNTDOWN_PRE_LISTEN
+                            self.countdown_start_time = time.time()
 
             except sr.WaitTimeoutError:
                 print("THREAD: Listening timed out")
@@ -1029,7 +1049,7 @@ class GameController:
 
             if self.feedback_message and self.current_state != GameState.GAME_OVER:
                 color = (0, 255, 0) if "ถูกต้อง" in self.feedback_message else (255, 100, 100)
-                msg = f"{self.feedback_message} (พลาดได้อีก {2 - self.mistakes} ครั้ง)" if self.mistakes > 0 else self.feedback_message
+                msg = f"{self.feedback_message} (พลาดได้อีก {3 - self.mistakes} ครั้ง)" if self.mistakes > 0 else self.feedback_message
                 self.draw_text_centered(msg, self.font_medium, color, 100, (0,0,0,200))
 
         # Scale and blit the internal surface onto the actual window
