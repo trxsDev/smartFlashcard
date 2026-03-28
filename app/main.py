@@ -99,8 +99,12 @@ class GameController:
         self.available_cameras = self.check_available_cameras()
         self.current_camera_index = self.load_camera_config()
         self.cap = None
+        
         # Start camera immediately for preview in Step 1
         if self.available_cameras:
+            # Bug Fix: Guard against stale camera index in config.json
+            if self.current_camera_index >= len(self.available_cameras):
+                self.current_camera_index = 0
             self.init_camera(self.available_cameras[self.current_camera_index])
 
         # Network Check
