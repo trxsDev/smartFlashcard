@@ -50,7 +50,7 @@ class FeatureMatcher:
                 img_gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
                 
             # Optional: Resize reference image if too large
-            max_dim = 800
+            max_dim = 640
             h, w = img_gray.shape
             if max(h, w) > max_dim:
                 scale = max_dim / max(h, w)

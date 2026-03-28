@@ -107,11 +107,11 @@ class GameController:
         self.network_status = "รอการตรวจสอบ..."
         self.is_checking_network = False
         
-        # Initialize Feature Matcher (SIFT)
-        print("Loading SIFT Feature Matcher...")
+        # Initialize Feature Matcher (SIFT) in Background Thread to speed up Startup
         self.current_unit = "Unit1"
-        self.matcher = FeatureMatcher(get_resource_path(f"card_images/{self.current_unit}")) 
-        print(f"Features loaded for {self.current_unit}.")
+        self.matcher = None
+        self.matcher_ready = False
+        threading.Thread(target=self.load_matcher_background, args=(self.current_unit,), daemon=True).start()
 
         # Load dynamic category maps and flashcards
         self.category_map = UNIT_DATA[self.current_unit]["cards"]
@@ -351,10 +351,18 @@ class GameController:
         self.feedback_message = reason_message
         print(f"Mistake {self.mistakes}: {reason_message}")
 
+    def load_matcher_background(self, unit_id):
+        """Threaded function to load the CV matcher without hanging the UI"""
+        try:
+            self.matcher = FeatureMatcher(get_resource_path(f"card_images/{unit_id}"))
+            self.matcher_ready = True
+        except Exception as e:
+            print(f"Error loading matcher: {e}")
+
     def scan_worker(self):
         """Threaded function for running SIFT prediction without blocking UI"""
         while self.running:
-            if self.current_state == GameState.SCANNING and self.current_scan_frame is not None:
+            if self.current_state == GameState.SCANNING and self.current_scan_frame is not None and self.matcher_ready:
                 # Targeted Scanning: Only look for patterns of the current target card
                 target_info = self.category_map.get(self.target_category, {})
                 patterns = target_info.get("patterns", [])
@@ -488,7 +496,7 @@ class GameController:
         # 2. Process based on State
         if self.current_state == GameState.SPLASH_SCREEN:
             elapsed = time.time() - self.splash_start_time
-            if elapsed >= 3.0: # Show splash for 3 seconds
+            if elapsed >= 1.5: # Show splash for 1.5 seconds (Reduced from 3.0)
                 self.current_state = GameState.SETTINGS_SCREEN_STEP_1
                 try:
                     pygame.mixer.music.play(-1) # Start BGM now
@@ -999,7 +1007,10 @@ class GameController:
             self.screen.blit(header_surf, (20, 15))
 
             if self.current_state == GameState.SCANNING:
-                scan_msg = self.font_small.render("ส่องกล้องไปที่รูปภาพบัตรคำ...", True, (200, 200, 200))
+                if not self.matcher_ready:
+                    scan_msg = self.font_small.render("กำลังโหลดข้อมูลบทเรียน...", True, (255, 255, 100))
+                else:
+                    scan_msg = self.font_small.render("ส่องกล้องไปที่รูปภาพบัตรคำ...", True, (200, 200, 200))
                 self.screen.blit(scan_msg, (20, 85))
 
             elif self.current_state == GameState.COUNTDOWN:
@@ -1188,9 +1199,11 @@ class GameController:
                     # For now, let's allow selection if not empty or just allow it and see
                     self.current_unit = unit_id
                     
-                    # Reload Matcher for the new unit
+                    # Reload Matcher for the new unit in Background
                     print(f"Switching to {unit_id}...")
-                    self.matcher = FeatureMatcher(get_resource_path(f"card_images/{unit_id}"))
+                    self.matcher_ready = False
+                    threading.Thread(target=self.load_matcher_background, args=(unit_id,), daemon=True).start()
+                    
                     self.category_map = UNIT_DATA[unit_id]["cards"]
                     # Sequence should be the Thai keys
                     self.flashcards = list(self.category_map.keys())
