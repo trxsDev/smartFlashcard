@@ -49,16 +49,31 @@ class GameState(Enum):
 
 class GameController:
     def __init__(self):
-        # Initialize Pygame
         pygame.init()
-        self.window = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT), pygame.RESIZABLE)
+        self.window = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT), pygame.DOUBLEBUF | pygame.HWSURFACE)
         self.screen = pygame.Surface((WINDOW_WIDTH, WINDOW_HEIGHT))
         pygame.display.set_caption(APP_NAME)
+
+        # --- Instant Splash Feedback ---
+        # Show a splash image immediately while the rest of the assets load
+        try:
+            splash_path = get_resource_path("assets/ui/backgrounds/icon_background.png")
+            if os.path.exists(splash_path):
+                icon_bg = pygame.image.load(splash_path).convert()
+                icon_bg = pygame.transform.scale(icon_bg, (WINDOW_WIDTH, WINDOW_HEIGHT))
+                self.window.blit(icon_bg, (0, 0))
+                # Draw a simple loading indicator or text
+                # (Optional: can add "Loading..." text here)
+                pygame.display.flip()
+        except:
+            pass
         
         # Load and set the Window Icon
         try:
-            self.app_icon = pygame.image.load(get_resource_path("assets/ui/icons/icon.png")).convert_alpha()
-            pygame.display.set_icon(self.app_icon)
+            icon_path = get_resource_path("assets/ui/icons/icon.png")
+            if os.path.exists(icon_path):
+                self.app_icon = pygame.image.load(icon_path).convert_alpha()
+                pygame.display.set_icon(self.app_icon)
         except:
             self.app_icon = None
             pass
