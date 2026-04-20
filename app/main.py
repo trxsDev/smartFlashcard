@@ -9,9 +9,22 @@ import numpy as np
 import json
 import requests
 import difflib
+import ctypes
 from enum import Enum, auto
 from feature_matcher import FeatureMatcher
-from config import APP_NAME, WINDOW_WIDTH, WINDOW_HEIGHT, FPS, UNIT_DATA, get_resource_path
+from config import APP_NAME, WINDOW_WIDTH, WINDOW_HEIGHT, FPS, UNIT_DATA, get_resource_path, logger
+
+# --- Windows High DPI Awareness ---
+if sys.platform == "win32":
+    try:
+        # Query DPI Awareness (Windows 8.1+)
+        ctypes.windll.shcore.SetProcessDpiAwareness(1) # 1 = PROCESS_SYSTEM_DPI_AWARE
+    except Exception:
+        try:
+            # Older Windows (Vista, 7, 8)
+            ctypes.windll.user32.SetProcessDPIAware()
+        except Exception:
+            pass # Fallback for non-windows or errors
 
 
 # --- State Machine ---
@@ -53,8 +66,9 @@ class GameController:
         self.clock = pygame.time.Clock()
         
         # Initialize Audio Mixer & SFX
-        pygame.mixer.init()
         try:
+            pygame.mixer.pre_init(44100, -16, 2, 512)
+            pygame.mixer.init()
             self.sfx_correct = pygame.mixer.Sound(get_resource_path("assets/sfx/correct.mp3"))
             self.sfx_wrong = pygame.mixer.Sound(get_resource_path("assets/sfx/wrong.mp3"))
             self.sfx_hover = pygame.mixer.Sound(get_resource_path("assets/sfx/hover.mp3"))
@@ -62,14 +76,10 @@ class GameController:
             self.sfx_new_word = pygame.mixer.Sound(get_resource_path("assets/sfx/new_word.mp3"))
             self.sfx_game_over = pygame.mixer.Sound(get_resource_path("assets/sfx/game_over.mp3"))
             self.sfx_fail = pygame.mixer.Sound(get_resource_path("assets/sfx/faild.mp3"))
-        except:
-            self.sfx_correct = None
-            self.sfx_wrong = None
-            self.sfx_hover = None
-            self.sfx_click = None
-            self.sfx_new_word = None
-            self.sfx_game_over = None
-            self.sfx_fail = None
+        except Exception as e:
+            logger.error(f"Failed to initialize mixer or load SFX: {e}")
+            self.sfx_correct = self.sfx_wrong = self.sfx_hover = self.sfx_click = None
+            self.sfx_new_word = self.sfx_game_over = self.sfx_fail = None
 
         self.bgm_volume = 0.5
         self.sfx_volume = 0.8
@@ -79,39 +89,40 @@ class GameController:
         try:
             pygame.mixer.music.load(get_resource_path("assets/sfx/bgm.mp3"))
             pygame.mixer.music.set_volume(self.bgm_volume * 0.2)
-            # BGM will be played after SPLASH_SCREEN finishes
-        except:
-            print(f"Warning: {get_resource_path('assets/sfx/bgm.mp3')} not found!")
+        except Exception as e:
+            logger.warning(f"BGM could not be loaded: {e}")
 
-        self.hovered_buttons = set() # Track hover state to play sound only once
+        self.hovered_buttons = set()
 
-        # Fonts (Using Mali to match the UI style and support Thai characters)
-        font_bold = get_resource_path("assets/fonts/Mali/Mali-Bold.ttf")
-        font_regular = get_resource_path("assets/fonts/Mali/Mali-Regular.ttf")
-        
-        self.font_title = pygame.font.Font(font_bold, 75)
-        self.font_large = pygame.font.Font(font_bold, 60)
-        self.font_medium = pygame.font.Font(font_bold, 40)
-        self.font_small = pygame.font.Font(font_regular, 25)
-        self.font_tiny = pygame.font.Font(font_regular, 18)
+        # Fonts
+        try:
+            font_bold = get_resource_path("assets/fonts/Mali/Mali-Bold.ttf")
+            font_regular = get_resource_path("assets/fonts/Mali/Mali-Regular.ttf")
+            self.font_title = pygame.font.Font(font_bold, 75)
+            self.font_large = pygame.font.Font(font_bold, 60)
+            self.font_medium = pygame.font.Font(font_bold, 40)
+            self.font_small = pygame.font.Font(font_regular, 25)
+            self.font_tiny = pygame.font.Font(font_regular, 18)
+        except Exception as e:
+            logger.error(f"Failed to load fonts: {e}")
+            self.font_title = self.font_large = self.font_medium = pygame.font.Font(None, 40)
+            self.font_small = self.font_tiny = pygame.font.Font(None, 24)
 
-        # Camera Setup Variables
+        # Camera Setup
         self.available_cameras = self.check_available_cameras()
         self.current_camera_index = self.load_camera_config()
         self.cap = None
         
-        # Start camera immediately for preview in Step 1
         if self.available_cameras:
-            # Bug Fix: Guard against stale camera index in config.json
             if self.current_camera_index >= len(self.available_cameras):
                 self.current_camera_index = 0
             self.init_camera(self.available_cameras[self.current_camera_index])
 
-        # Network Check
+        # Network Status
         self.network_status = "รอการตรวจสอบ..."
         self.is_checking_network = False
         
-        # Initialize Feature Matcher (SIFT) in Background Thread to speed up Startup
+        # Initialize Feature Matcher
         self.current_unit = "Unit1"
         self.matcher = None
         self.matcher_ready = False
@@ -187,7 +198,7 @@ class GameController:
         self.cv_thread = threading.Thread(target=self.scan_worker)
         self.cv_thread.daemon = True
         self.cv_thread.start()
-
+        
         # Frame buffer
         self.current_surface = None
         self.current_window_width = WINDOW_WIDTH
@@ -231,8 +242,11 @@ class GameController:
             return 0
 
     def save_camera_config(self, index):
-        with open("config.json", "w") as f:
-            json.dump({"camera_index": index}, f)
+        try:
+            with open("config.json", "w") as f:
+                json.dump({"camera_index": index}, f)
+        except Exception as e:
+            logger.error(f"Failed to save camera config: {e}")
 
     def check_network_worker(self):
         """Threaded network check to prevent UI hanging"""
@@ -258,18 +272,26 @@ class GameController:
         return available
 
     def init_camera(self, camera_index):
-        if self.cap:
-            self.cap.release()
-            self.cap = None
-        
-        self.cap = cv2.VideoCapture(camera_index)
-        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, WINDOW_WIDTH)
-        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, WINDOW_HEIGHT)
-        
-        if not self.cap.isOpened():
-            print(f"Error: Could not open webcam {camera_index}.")
-        else:
-            print(f"Initialized Camera {camera_index}")
+        try:
+            if self.cap:
+                self.cap.release()
+                self.cap = None
+            
+            self.cap = cv2.VideoCapture(camera_index)
+            # Use smaller resolution if 720p is not supported or slow
+            self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+            self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+            
+            if not self.cap.isOpened():
+                logger.error(f"Error: Could not open webcam {camera_index}.")
+                # Try fallback to index 0 if not 0
+                if camera_index != 0:
+                    logger.info("Retrying with camera 0 as fallback...")
+                    self.init_camera(0)
+            else:
+                logger.info(f"Successfully initialized Camera {camera_index}")
+        except Exception as e:
+            logger.error(f"Critical error during camera init: {e}")
 
     def release_camera(self):
         if self.cap:
@@ -358,31 +380,41 @@ class GameController:
     def load_matcher_background(self, unit_id):
         """Threaded function to load the CV matcher without hanging the UI"""
         try:
-            self.matcher = FeatureMatcher(get_resource_path(f"card_images/{unit_id}"))
+            path = get_resource_path(f"card_images/{unit_id}")
+            if not os.path.exists(path):
+                logger.warning(f"Matcher path not found: {path}")
+                return
+            self.matcher = FeatureMatcher(path)
             self.matcher_ready = True
         except Exception as e:
-            print(f"Error loading matcher: {e}")
+            logger.error(f"Error loading matcher for {unit_id}: {e}")
 
     def scan_worker(self):
         """Threaded function for running SIFT prediction without blocking UI"""
         while self.running:
-            if self.current_state == GameState.SCANNING and self.current_scan_frame is not None and self.matcher_ready:
-                # Targeted Scanning: Only look for patterns of the current target card
-                target_info = self.category_map.get(self.target_category, {})
-                patterns = target_info.get("patterns", [])
-                
-                # Predict on the latest captured frame copy
-                frame_to_scan = self.current_scan_frame.copy()
-                self.last_scan_result = self.matcher.predict(frame_to_scan, target_classes=patterns)
-                time.sleep(0.1) # Max ~10 FPS for the detector to save CPU
-            else:
-                time.sleep(0.05)
+            try:
+                if self.current_state == GameState.SCANNING and self.current_scan_frame is not None and self.matcher_ready:
+                    # Targeted Scanning
+                    target_info = self.category_map.get(self.target_category, {})
+                    patterns = target_info.get("patterns", [])
+                    
+                    frame_to_scan = self.current_scan_frame.copy()
+                    self.last_scan_result = self.matcher.predict(frame_to_scan, target_classes=patterns)
+                    time.sleep(0.08) # Slightly faster updates (~12 FPS)
+                else:
+                    time.sleep(0.05)
+            except Exception as e:
+                logger.error(f"Error in scan_worker: {e}")
+                time.sleep(0.5) # Wait before retry
 
     def listen_speech_worker(self):
         """Threaded function for speech recognition to prevent blocking"""
-        print("THREAD: Starting listening...")
+        logger.info("Speech recognition started...")
         # Pause BGM so it doesn't interfere with the microphone
-        pygame.mixer.music.pause()
+        try:
+            if pygame.mixer.music.get_busy():
+                pygame.mixer.music.pause()
+        except: pass
         
         with sr.Microphone() as source:
             try:
@@ -400,7 +432,7 @@ class GameController:
                 print("THREAD: Processing audio...")
                 try:
                     text = self.recognizer.recognize_google(audio, language="th-TH")
-                    print(f"THREAD: Heard '{text}'")
+                    logger.info(f"Speech Recognized: '{text}'")
                     self.last_speech_result = text
                     
                     # Modern Check: Check if target word OR any aliases are in the result
@@ -443,7 +475,7 @@ class GameController:
                                 self.countdown_start_time = time.time()
                 
                 except sr.UnknownValueError:
-                    print("THREAD: Could not understand audio")
+                    logger.warning("Speech Recognition: Could not understand audio")
                     self.feedback_message = "???"
                     # Deduct life for "???" as requested to speed up the game
                     if self.mistakes >= 2: # 3rd mistake
@@ -456,7 +488,7 @@ class GameController:
                             self.current_state = GameState.COUNTDOWN_PRE_LISTEN
                             self.countdown_start_time = time.time()
                 except sr.RequestError as e:
-                    print(f"THREAD: Request error; {e}")
+                    logger.error(f"Speech Recognition Request Error: {e}")
                     self.feedback_message = "ข้อผิดพลาดเครือข่าย"
                     # Network error but we still treat it as a try to prevent infinite wait
                     if self.mistakes >= 2:
@@ -470,15 +502,17 @@ class GameController:
                             self.countdown_start_time = time.time()
 
             except sr.WaitTimeoutError:
-                print("THREAD: Listening timed out")
+                logger.info("Speech Recognition: Listening timed out")
             except Exception as e:
-                print(f"THREAD: Error: {e}")
+                logger.error(f"Speech Recognition Thread Error: {e}")
             finally:
                 self.is_listening = False 
                 # Resume BGM if we haven't transitioned to Game Over
-                if self.current_state != GameState.GAME_OVER and self.current_state != GameState.END_SCREEN_FADE:
-                    pygame.mixer.music.unpause()
-                print("THREAD: Finished.")
+                try:
+                    if self.current_state != GameState.GAME_OVER and self.current_state != GameState.END_SCREEN_FADE:
+                        pygame.mixer.music.unpause()
+                except: pass
+                logger.info("Speech recognition thread finished.")
 
     def update(self):
         # 0. If paused, don't update camera or logic
@@ -620,9 +654,10 @@ class GameController:
                 self.current_state = GameState.GAME_OVER
 
         # 3. Convert Frame to Pygame Surface
+        # Faster way to convert BGR to RGB and align for Pygame (width, height)
         frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        frame_rgb = np.rot90(frame_rgb)
-        frame_rgb = np.flipud(frame_rgb)
+        # Transpose (h, w, c) -> (w, h, c) and then flip to match screen orientation
+        frame_rgb = np.transpose(frame_rgb, (1, 0, 2))
         self.current_surface = pygame.surfarray.make_surface(frame_rgb)
 
     def draw_text_centered(self, text, font, color, y_offset=0, bg_color=None):

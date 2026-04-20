@@ -1,6 +1,9 @@
 import cv2
 import numpy as np
 import os
+import logging
+
+logger = logging.getLogger("SmartFlashCard")
 
 class FeatureMatcher:
     def __init__(self, source_dir):
@@ -8,23 +11,23 @@ class FeatureMatcher:
         # Standard/slightly sensitive SIFT to avoid capturing noise
         self.sift = cv2.SIFT_create(contrastThreshold=0.03, edgeThreshold=10)
         self.references = {}
-        # MIN_MATCH_COUNT: Increased to 25 for stricter matching (requires more points to confirm)
-        self.MIN_MATCH_COUNT = 25
+        # MIN_MATCH_COUNT: Stricter matching
+        self.MIN_MATCH_COUNT = 20 # Slightly reduced from 25 for better usability while keeping accuracy
         
         # Initialize FLANN matcher
         FLANN_INDEX_KDTREE = 1
         index_params = dict(algorithm=FLANN_INDEX_KDTREE, trees=5)
-        # Increased checks to 100 for more accurate (but slightly slower) matching
-        search_params = dict(checks=100)
+        # Reduced checks to 50 for faster matching on mobile CPUs, still high accuracy
+        search_params = dict(checks=50)
         self.flann = cv2.FlannBasedMatcher(index_params, search_params)
 
-        print(f"FeatureMatcher: Loading references from {source_dir}...")
+        logger.info(f"FeatureMatcher: Loading references from {source_dir}...")
         self._load_reference_images(source_dir)
-        print(f"FeatureMatcher: Loaded {len(self.references)} reference classes.")
+        logger.info(f"FeatureMatcher: Loaded {len(self.references)} reference classes.")
 
     def _load_reference_images(self, source_dir):
         if not os.path.exists(source_dir):
-            print(f"Error: Directory '{source_dir}' not found.")
+            logger.error(f"Error: Directory '{source_dir}' not found.")
             return
 
         for filename in os.listdir(source_dir):

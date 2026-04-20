@@ -1,5 +1,16 @@
 import os
 import sys
+import logging
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+logger = logging.getLogger("SmartFlashCard")
 
 # --- PyInstaller Resource Path Helper ---
 def get_resource_path(relative_path):
