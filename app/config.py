@@ -30,8 +30,8 @@ def get_resource_path(relative_path):
 
 # --- Application Configuration ---
 APP_NAME = "Smart Card Scanner (SCS) O1"
-WINDOW_WIDTH = 1280
-WINDOW_HEIGHT = 720
+WINDOW_WIDTH = 1920
+WINDOW_HEIGHT = 1080
 FPS = 30
 CONFIDENCE_THRESHOLD = 0.8
 
