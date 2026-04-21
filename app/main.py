@@ -561,7 +561,15 @@ class GameController:
         if self.current_state == GameState.SETTINGS_SCREEN_STEP_1:
             self.draw_panel(pygame.Rect(1280//2-300, 720//2-250, 600, 500))
             self.draw_text_centered("ตั้งค่ากล้อง", self.font_large, (255, 80, 80), -200)
-            if self.current_surface: self.screen.blit(pygame.transform.scale(self.current_surface, (384, 216)), (1280//2-192, 720//2-138))
+            if self.current_surface and self.available_cameras:
+                self.screen.blit(pygame.transform.scale(self.current_surface, (384, 216)), (1280//2-192, 720//2-138))
+            else:
+                pygame.draw.rect(self.screen, (100, 100, 100), (1280//2-192, 720//2-138, 384, 216), border_radius=10)
+                self.draw_text_centered("ไม่พบกล้องเชื่อมต่อ", self.font_small, (255, 255, 255), -30)
+            
+            cam_name = f"Camera {self.available_cameras[self.current_camera_index]}" if self.available_cameras else "ไม่มีกล้อง"
+            self.draw_text_centered(cam_name, self.font_medium, (50, 50, 100), 100)
+            
             self.draw_bubbly_button("◀", pygame.Rect(1280//2-220, 720//2+90, 60, 60), color=(80, 150, 255))
             self.draw_bubbly_button("▶", pygame.Rect(1280//2+160, 720//2+90, 60, 60), color=(80, 150, 255))
             self.draw_bubbly_button("ถัดไป", pygame.Rect(1280//2-100, 720//2+170, 200, 60), color=(100, 220, 100))
@@ -601,9 +609,17 @@ class GameController:
     def handle_click(self):
         p = self.mouse_pos
         if self.current_state == GameState.SETTINGS_SCREEN_STEP_1:
-            if pygame.Rect(1280//2-220, 720//2+90, 60, 60).collidepoint(p): self.current_camera_index=(self.current_camera_index-1)%len(self.available_cameras); self.init_camera(self.available_cameras[self.current_camera_index])
-            elif pygame.Rect(1280//2+160, 720//2+90, 60, 60).collidepoint(p): self.current_camera_index=(self.current_camera_index+1)%len(self.available_cameras); self.init_camera(self.available_cameras[self.current_camera_index])
-            elif pygame.Rect(1280//2-100, 720//2+170, 200, 60).collidepoint(p): self.save_camera_config(self.current_camera_index); self.current_state=GameState.SETTINGS_SCREEN_STEP_2
+            if self.available_cameras:
+                if pygame.Rect(1280//2-220, 720//2+90, 60, 60).collidepoint(p): 
+                    self.current_camera_index=(self.current_camera_index-1)%len(self.available_cameras); 
+                    self.init_camera(self.available_cameras[self.current_camera_index])
+                elif pygame.Rect(1280//2+160, 720//2+90, 60, 60).collidepoint(p): 
+                    self.current_camera_index=(self.current_camera_index+1)%len(self.available_cameras); 
+                    self.init_camera(self.available_cameras[self.current_camera_index])
+            
+            if pygame.Rect(1280//2-100, 720//2+170, 200, 60).collidepoint(p): 
+                self.save_camera_config(self.available_cameras[self.current_camera_index] if self.available_cameras else 0)
+                self.current_state=GameState.SETTINGS_SCREEN_STEP_2
         elif self.current_state == GameState.SETTINGS_SCREEN_STEP_2:
             if pygame.Rect(1280//2-150, 720//2+100, 300, 60).collidepoint(p):
                 if "สำเร็จ" in self.network_status: self.current_state=GameState.LANDING_PAGE; self.release_camera()
