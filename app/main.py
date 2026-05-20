@@ -50,7 +50,7 @@ class GameState(Enum):
 class GameController:
     def __init__(self):
         pygame.init()
-        self.window = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT), pygame.DOUBLEBUF | pygame.HWSURFACE)
+        self.window = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT), pygame.DOUBLEBUF | pygame.HWSURFACE | pygame.RESIZABLE)
         self.screen = pygame.Surface((WINDOW_WIDTH, WINDOW_HEIGHT))
         pygame.display.set_caption(APP_NAME)
 
@@ -60,7 +60,7 @@ class GameController:
             splash_path = get_resource_path("assets/ui/backgrounds/icon_background.png")
             if os.path.exists(splash_path):
                 icon_bg = pygame.image.load(splash_path).convert()
-                icon_bg = pygame.transform.scale(icon_bg, (WINDOW_WIDTH, WINDOW_HEIGHT))
+                icon_bg = pygame.transform.smoothscale(icon_bg, (WINDOW_WIDTH, WINDOW_HEIGHT))
                 self.window.blit(icon_bg, (0, 0))
                 # Draw a simple loading indicator or text
                 # (Optional: can add "Loading..." text here)
@@ -149,7 +149,7 @@ class GameController:
 
         # Load UI Image Assets
         try:
-            self.bg_splash = pygame.transform.scale(pygame.image.load(get_resource_path("assets/ui/backgrounds/icon_background.png")).convert(), (WINDOW_WIDTH, WINDOW_HEIGHT))
+            self.bg_splash = pygame.transform.smoothscale(pygame.image.load(get_resource_path("assets/ui/backgrounds/icon_background.png")).convert(), (WINDOW_WIDTH, WINDOW_HEIGHT))
         except:
             self.bg_splash = None
             
@@ -1329,7 +1329,7 @@ class GameController:
                 if event.type == pygame.QUIT:
                     self.running = False
                 elif event.type == pygame.VIDEORESIZE:
-                    pass # Handled inherently by surface scaling
+                    self.window = pygame.display.set_mode((event.w, event.h), pygame.DOUBLEBUF | pygame.HWSURFACE | pygame.RESIZABLE)
                 elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                     lpos = self.get_logical_mouse_pos()
                     
